@@ -26,15 +26,6 @@ jobs:
       - name: Script chalao
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
           IG_BUSINESS_ID: ${{ secrets.IG_BUSINESS_ID }}
         run: python scripts/check_and_post.py
-
-      - name: State file ko commit karo
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add state/last_id.txt
-          git diff --staged --quiet || git commit -m "Update last seen message id"
-          git push
