@@ -8,8 +8,6 @@ from PIL import Image, ImageDraw, ImageFont
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 
-IMGBB_API_KEY = os.environ["IMGBB_API_KEY"]
-
 IG_ACCESS_TOKEN = os.environ["IG_ACCESS_TOKEN"]
 IG_BUSINESS_ID = os.environ["IG_BUSINESS_ID"]
 
@@ -87,17 +85,17 @@ def generate_image(text):
     return output_path
 
 
-def upload_to_imgbb(image_path):
+def upload_image(image_path):
     with open(image_path, "rb") as f:
         response = requests.post(
-            "https://api.imgbb.com/1/upload",
-            params={"key": IMGBB_API_KEY},
-            files={"image": f},
+            "https://catbox.moe/user/api.php",
+            data={"reqtype": "fileupload"},
+            files={"fileToUpload": f},
         )
-    data = response.json()
-    if not data.get("success"):
-        raise Exception(f"ImgBB upload failed: {data}")
-    return data["data"]["url"]
+    url = response.text.strip()
+    if not url.startswith("http"):
+        raise Exception(f"catbox upload failed: {url}")
+    return url
 
 
 def post_to_instagram(image_url, caption):
@@ -134,7 +132,7 @@ def main():
     print(f"Naya message mila (update_id={new_id}):", text[:100])
 
     image_path = generate_image(text)
-    image_url = upload_to_imgbb(image_path)
+    image_url = upload_image(image_path)
     print("Image uploaded:", image_url)
 
     caption = text[:2000]
