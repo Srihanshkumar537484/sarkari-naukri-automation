@@ -1,20 +1,17 @@
-
 """
 Main automation script - GitHub Actions har 15 min mein isse chalata hai.
 """
 
 import os
-import re
 import subprocess
 import time
 import requests
-
 from PIL import Image, ImageDraw, ImageFont
+
+TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 
 IG_ACCESS_TOKEN = os.environ["IG_ACCESS_TOKEN"]
 IG_BUSINESS_ID = os.environ["IG_BUSINESS_ID"]
-
-TELEGRAM_CHANNEL = "sarkariresulinfo"
 
 GITHUB_REPO = "Srihanshkumar537484/sarkari-naukri-automation"
 GITHUB_BRANCH = "main"
@@ -31,49 +28,35 @@ def get_last_seen_id():
         return int(content) if content else 0
 
 
-def save_last_seen_id(msg_id):
+def save_last_seen_id(update_id):
     os.makedirs("state", exist_ok=True)
     with open(STATE_FILE, "w") as f:
-        f.write(str(msg_id))
+        f.write(str(update_id))
 
 
-def get_new_channel_message():
+def get_new_telegram_message():
     last_id = get_last_seen_id()
 
-    url = f"https://t.me/s/{TELEGRAM_CHANNEL}"
-    response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-    html = response.text
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
+    params = {"offset": last_id + 1} if last_id else {}
+    response = requests.get(url, params=params)
+    data = response.json()
 
-    post_ids = [int(m) for m in re.findall(rf'data-post="{TELEGRAM_CHANNEL}/(\d+)"', html)]
-    if not post_ids:
+    if not data.get("ok") or not data.get("result"):
         return None, last_id
 
-    latest_id = max(post_ids)
-    if latest_id <= last_id:
-        return None, last_id
-
-    blocks = html.split('class="tgme_widget_message ')
-    latest_block = blocks[-1]
-
-    text_match = re.search(
-        r'class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>',
-        latest_block, re.DOTALL,
-    )
-    if not text_match:
-        return None, latest_id
-
-    raw_text = text_match.group(1)
-    text = re.sub(r"<br\s*/?>", "\n", raw_text)
-    text = re.sub(r"<[^>]+>", "", text)
-    text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").strip()
+    latest_update = data["result"][-1]
+    update_id = latest_update["update_id"]
+    message = latest_update.get("message", {})
+    text = message.get("text", "")
 
     if not text:
-        return None, latest_id
+        return None, update_id
 
-    return text, latest_id
+    return text, update_id
 
 
-def generate_image(text, msg_id):
+def generate_image(text, update_id):
     img = Image.new("RGB", (1080, 1080), color=(20, 60, 130))
     draw = ImageDraw.Draw(img)
 
@@ -104,19 +87,19 @@ def generate_image(text, msg_id):
         y += 55
 
     os.makedirs(POSTS_DIR, exist_ok=True)
-    filename = f"{msg_id}.jpg"
+    filename = f"{update_id}.jpg"
     output_path = os.path.join(POSTS_DIR, filename)
     img.save(output_path, "JPEG")
     return output_path, filename
 
 
-def commit_and_push(image_path, msg_id):
+def commit_and_push(image_path, update_id):
     subprocess.run(["git", "config", "user.name", "github-actions"], check=True)
     subprocess.run(["git", "config", "user.email", "actions@github.com"], check=True)
     subprocess.run(["git", "add", image_path, STATE_FILE], check=True)
 
     result = subprocess.run(
-        ["git", "commit", "-m", f"Add post for message {msg_id}"],
+        ["git", "commit", "-m", f"Add post for update {update_id}"],
         capture_output=True, text=True,
     )
     print("Commit output:", result.stdout, result.stderr)
@@ -151,20 +134,20 @@ def post_to_instagram(image_url, caption):
 
 
 def main():
-    text, new_id = get_new_channel_message()
+    text, new_id = get_new_telegram_message()
 
     if text is None:
         print("Koi naya message nahi mila.")
-        if new_id and new_id != get_last_seen_id():
+        if new_id:
             save_last_seen_id(new_id)
             subprocess.run(["git", "config", "user.name", "github-actions"], check=True)
             subprocess.run(["git", "config", "user.email", "actions@github.com"], check=True)
             subprocess.run(["git", "add", STATE_FILE], check=True)
-            subprocess.run(["git", "commit", "-m", "Update last seen id (no text post)"], check=False)
+            subprocess.run(["git", "commit", "-m", "Update last seen id (no new post)"], check=False)
             subprocess.run(["git", "push"], check=False)
         return
 
-    print(f"Naya message mila (id={new_id}):", text[:100])
+    print(f"Naya message mila (update_id={new_id}):", text[:100])
 
     image_path, filename = generate_image(text, new_id)
     save_last_seen_id(new_id)
