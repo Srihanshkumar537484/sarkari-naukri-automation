@@ -4,14 +4,9 @@ Main automation script - GitHub Actions har 15 min mein isse chalata hai.
 
 import os
 import requests
-from telethon.sync import TelegramClient
-from telethon.sessions import StringSession
 from PIL import Image, ImageDraw, ImageFont
 
-TELEGRAM_API_ID = int(os.environ["TELEGRAM_API_ID"])
-TELEGRAM_API_HASH = os.environ["TELEGRAM_API_HASH"]
-TELEGRAM_SESSION = os.environ["TELEGRAM_SESSION"]
-TELEGRAM_CHANNEL = os.environ["TELEGRAM_CHANNEL"]
+TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 
 IMGBB_API_KEY = os.environ["IMGBB_API_KEY"]
 
@@ -29,26 +24,32 @@ def get_last_seen_id():
         return int(content) if content else 0
 
 
-def save_last_seen_id(msg_id):
+def save_last_seen_id(update_id):
     os.makedirs("state", exist_ok=True)
     with open(STATE_FILE, "w") as f:
-        f.write(str(msg_id))
+        f.write(str(update_id))
 
 
 def get_new_telegram_message():
     last_id = get_last_seen_id()
 
-    with TelegramClient(StringSession(TELEGRAM_SESSION), TELEGRAM_API_ID, TELEGRAM_API_HASH) as client:
-        messages = client.get_messages(TELEGRAM_CHANNEL, limit=1)
-        if not messages:
-            return None, last_id
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
+    params = {"offset": last_id + 1} if last_id else {}
+    response = requests.get(url, params=params)
+    data = response.json()
 
-        latest = messages[0]
-        if latest.id <= last_id:
-            return None, last_id
+    if not data.get("ok") or not data.get("result"):
+        return None, last_id
 
-        text = latest.message or ""
-        return text, latest.id
+    latest_update = data["result"][-1]
+    update_id = latest_update["update_id"]
+    message = latest_update.get("message", {})
+    text = message.get("text", "")
+
+    if not text:
+        return None, update_id
+
+    return text, update_id
 
 
 def generate_image(text):
@@ -126,9 +127,11 @@ def main():
 
     if text is None:
         print("Koi naya message nahi mila.")
+        if new_id:
+            save_last_seen_id(new_id)
         return
 
-    print(f"Naya message mila (id={new_id}):", text[:100])
+    print(f"Naya message mila (update_id={new_id}):", text[:100])
 
     image_path = generate_image(text)
     image_url = upload_to_imgbb(image_path)
