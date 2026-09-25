@@ -1,8 +1,11 @@
+
 """
 Main automation script - GitHub Actions har 15 min mein isse chalata hai.
 """
 
 import os
+import subprocess
+import time
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
@@ -11,7 +14,11 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 IG_ACCESS_TOKEN = os.environ["IG_ACCESS_TOKEN"]
 IG_BUSINESS_ID = os.environ["IG_BUSINESS_ID"]
 
+GITHUB_REPO = "Srihanshkumar537484/sarkari-naukri-automation"
+GITHUB_BRANCH = "main"
+
 STATE_FILE = "state/last_id.txt"
+POSTS_DIR = "posts"
 
 
 def get_last_seen_id():
@@ -50,7 +57,7 @@ def get_new_telegram_message():
     return text, update_id
 
 
-def generate_image(text):
+def generate_image(text, update_id):
     img = Image.new("RGB", (1080, 1080), color=(20, 60, 130))
     draw = ImageDraw.Draw(img)
 
@@ -80,22 +87,29 @@ def generate_image(text):
         draw.text((margin, y), line, font=font, fill=(255, 255, 255))
         y += 55
 
-    output_path = "generated_post.jpg"
+    os.makedirs(POSTS_DIR, exist_ok=True)
+    filename = f"{update_id}.jpg"
+    output_path = os.path.join(POSTS_DIR, filename)
     img.save(output_path, "JPEG")
-    return output_path
+    return output_path, filename
 
 
-def upload_image(image_path):
-    with open(image_path, "rb") as f:
-        response = requests.post(
-            "https://catbox.moe/user/api.php",
-            data={"reqtype": "fileupload"},
-            files={"fileToUpload": f},
-        )
-    url = response.text.strip()
-    if not url.startswith("http"):
-        raise Exception(f"catbox upload failed: {url}")
-    return url
+def commit_and_push(image_path, update_id):
+    subprocess.run(["git", "config", "user.name", "github-actions"], check=True)
+    subprocess.run(["git", "config", "user.email", "actions@github.com"], check=True)
+    subprocess.run(["git", "add", image_path, STATE_FILE], check=True)
+
+    result = subprocess.run(
+        ["git", "commit", "-m", f"Add post for update {update_id}"],
+        capture_output=True, text=True,
+    )
+    print("Commit output:", result.stdout, result.stderr)
+
+    subprocess.run(["git", "push"], check=True)
+
+
+def get_raw_url(filename):
+    return f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{POSTS_DIR}/{filename}"
 
 
 def post_to_instagram(image_url, caption):
@@ -127,19 +141,28 @@ def main():
         print("Koi naya message nahi mila.")
         if new_id:
             save_last_seen_id(new_id)
+            subprocess.run(["git", "config", "user.name", "github-actions"], check=True)
+            subprocess.run(["git", "config", "user.email", "actions@github.com"], check=True)
+            subprocess.run(["git", "add", STATE_FILE], check=True)
+            subprocess.run(["git", "commit", "-m", "Update last seen id (no new post)"], check=False)
+            subprocess.run(["git", "push"], check=False)
         return
 
     print(f"Naya message mila (update_id={new_id}):", text[:100])
 
-    image_path = generate_image(text)
-    image_url = upload_image(image_path)
-    print("Image uploaded:", image_url)
+    image_path, filename = generate_image(text, new_id)
+    save_last_seen_id(new_id)
+    commit_and_push(image_path, new_id)
+
+    time.sleep(10)
+
+    image_url = get_raw_url(filename)
+    print("Image URL:", image_url)
 
     caption = text[:2000]
     post_to_instagram(image_url, caption)
 
-    save_last_seen_id(new_id)
-    print("State update ho gaya, last_id =", new_id)
+    print("Done, last_id =", new_id)
 
 
 if __name__ == "__main__":
